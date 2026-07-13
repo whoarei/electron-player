@@ -387,6 +387,11 @@ ipcMain.handle('execute-xlr-event', async (_event, { eventName, payload }: { eve
         scheduleId: payload.scheduleId,
         playStats: manager.getPlayStats(payload.scheduleId),
       });
+      if (eventName === 'layoutEnd') {
+        // exits early if not a cycle layout
+        await manager.handleCycleLayoutEnd(payload.scheduleId);
+      }
+
     }
   } else if (eventName === 'commandCodeReceived') {
     // Handle command code received event
