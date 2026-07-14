@@ -45,13 +45,6 @@ export default class ScheduleManager {
     playStats: { [scheduleId: number]: number } = {};
     scheduleIdsThatHaveMaxPlays: number[] = [];
 
-    // Which layout in the group is currently active, keyed by campaign groupKey
-    private cycleGroupSequence: Map<number, number> = new Map();
-    // How many times the active layout has played this cycle, keyed by campaign groupKey
-    private cycleGroupPlays: Map<number, number> = new Map();
-    // scheduleIds of layouts that belong to a cycle campaign
-    private cycleScheduleIds: Set<number> = new Set();
-
     config: Config;
     faults: Faults;
 
@@ -90,26 +83,6 @@ export default class ScheduleManager {
 
     async update(schedule: Schedule) {
         this.schedule = schedule;
-
-        // Track which scheduleIds belong to a cycle campaign
-        this.cycleScheduleIds = new Set(
-            schedule.layouts
-                .filter(l => l.cyclePlayback)
-                .map(l => l.scheduleId)
-        );
-
-        // Drop state for any campaign groups no longer in the schedule
-        const validGroupKeys = new Set(
-            schedule.layouts
-                .filter(l => l.cyclePlayback && l.groupKey !== 0)
-                .map(l => l.groupKey)
-        );
-        for (const key of this.cycleGroupSequence.keys()) {
-            if (!validGroupKeys.has(key)) {
-                this.cycleGroupSequence.delete(key);
-                this.cycleGroupPlays.delete(key);
-            }
-        }
     }
 
     async updateSspSov(shareOfVoice: number, averageDuration: number) {
@@ -409,9 +382,6 @@ export default class ScheduleManager {
                 loop = [this.getSplash()];
             }
         }
-
-        // Collapse cycle campaigns so only one layout per campaign appears in the loop
-        loop = this.applyCyclePlayback(loop);
 
         // Is this layout loop different to the current one?
         // can we store a count and hash or similar?
@@ -879,118 +849,5 @@ export default class ScheduleManager {
         }
 
         return this.playStats;
-    }
-
-    /**
-     * Filters the layout loop so that only one layout per cycle campaign is included per pass.
-     * The active layout is determined by cycleGroupSequence for that groupKey.
-     * Non-cycle layouts pass through untouched.
-     */
-    private applyCyclePlayback(loop: ScheduleLayoutsType[]): ScheduleLayoutsType[] {
-        // Collect all cycle layouts by campaign (groupKey)
-        const cycleGroups = new Map<number, ScheduleLayoutsType[]>();
-        for (const layout of loop) {
-            const isCycleLayout = 'cyclePlayback' in layout
-                && (layout as Layout).cyclePlayback
-                && (layout as Layout).groupKey !== 0;
-
-            if (isCycleLayout) {
-                const key = (layout as Layout).groupKey;
-
-                // Initialise the campaign's list on first encounter
-                if (!cycleGroups.has(key)) {
-                    cycleGroups.set(key, []);
-                }
-
-                cycleGroups.get(key)!.push(layout);
-            }
-        }
-
-        // No cycle campaigns in this loop, nothing to do
-        if (cycleGroups.size === 0) {
-            return loop;
-        }
-
-        // Rebuild the loop, replacing each campaign with only its currently active layout
-        const placedCampaigns = new Set<number>();
-        const result: ScheduleLayoutsType[] = [];
-
-        for (const layout of loop) {
-            const isNonCycleLayout = !('cyclePlayback' in layout)
-                || !(layout as Layout).cyclePlayback
-                || (layout as Layout).groupKey === 0;
-
-            // Non-cycle layouts go straight in
-            if (isNonCycleLayout) {
-                result.push(layout);
-                continue;
-            }
-
-            const key = (layout as Layout).groupKey;
-
-            // Skip remaining layouts from a campaign already placed
-            if (placedCampaigns.has(key)) {
-                continue;
-            }
-
-            placedCampaigns.add(key);
-
-            const group = cycleGroups.get(key)!;
-            let sequence = this.cycleGroupSequence.get(key) ?? 0;
-
-            // Reset if the stored index is now out of range
-            if (sequence >= group.length) {
-                sequence = 0;
-            }
-
-            this.cycleGroupSequence.set(key, sequence);
-            result.push(group[sequence]);
-        }
-
-        return result;
-    }
-
-    /**
-     * Called when a cycle layout finishes playing.
-     * Increments the play count for the campaign and advances to the next layout once playCount is reached.
-     * Triggers a reassessment so the updated loop gets sent to XLR.
-     *
-     * @param scheduleId
-     */
-    async handleCycleLayoutEnd(scheduleId: number) {
-        if (!this.cycleScheduleIds.has(scheduleId)) {
-            return;
-        }
-
-        const layout = this.schedule.layouts.find(l => l.scheduleId === scheduleId);
-        if (!layout) {
-            return;
-        }
-
-        const groupKey = layout.groupKey;
-        const group = this.schedule.layouts.filter(
-            l => l.cyclePlayback && l.groupKey === groupKey
-        );
-
-        if (group.length === 0) {
-            return;
-        }
-
-        // Reset if the stored index is now out of range
-        const sequence = Math.min(this.cycleGroupSequence.get(groupKey) ?? 0, group.length - 1);
-        const playCount = Math.max(group[sequence].playCount ?? 1, 1); // treat 0 as 1
-        const plays = (this.cycleGroupPlays.get(groupKey) ?? 0) + 1;
-
-        if (plays >= playCount) {
-            // Advance to the next layout in the campaign, wrapping back to 0 at the end
-            const nextSequence = (sequence + 1) % group.length;
-            this.cycleGroupSequence.set(groupKey, nextSequence);
-            this.cycleGroupPlays.set(groupKey, 0);
-            console.info(`[ScheduleManager] Cycle campaign ${groupKey}: index ${sequence} to ${nextSequence}`);
-            await this.assessLayouts();
-        } else {
-            // Not ready to advance yet, just save the updated play count
-            this.cycleGroupPlays.set(groupKey, plays);
-        }
     }
 }

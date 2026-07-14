@@ -387,11 +387,6 @@ ipcMain.handle('execute-xlr-event', async (_event, { eventName, payload }: { eve
         scheduleId: payload.scheduleId,
         playStats: manager.getPlayStats(payload.scheduleId),
       });
-      if (eventName === 'layoutEnd') {
-        // exits early if not a cycle layout
-        await manager.handleCycleLayoutEnd(payload.scheduleId);
-      }
-
     }
   } else if (eventName === 'commandCodeReceived') {
     // Handle command code received event
@@ -1143,6 +1138,9 @@ const mainFunctions = {
                 response: item.response ?? '',
                 scheduleId: 'scheduleId' in item ? (item as Layout).scheduleId : -1,
                 code: layoutFile.localPath ? extractLayoutCode(layoutFile.localPath) : undefined,
+                cyclePlayback: 'cyclePlayback' in item ? (item as Layout).cyclePlayback : undefined,
+                groupKey: 'groupKey' in item ? (item as Layout).groupKey : undefined,
+                playCount: 'playCount' in item ? (item as Layout).playCount : undefined,
               },
             ];
           }
