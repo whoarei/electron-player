@@ -63,6 +63,10 @@ export class Config {
   // Device info
   macAddress: string = '';
 
+  // Set while a CMS transfer (changeCms) is in progress or has not yet been
+  // confirmed successful, so it can be resumed on the next boot after a crash.
+  pendingCmsTransfer: { cmsUrl: string; cmsKey: string; requestedAt: string } | null = null;
+
   constructor(app: Electron.App, platform: string, state: State) {
     const savePath = app.getPath('userData');
     this.savePath = join(savePath, 'config.json');
@@ -98,6 +102,7 @@ export class Config {
       this.cmsKey = data.cmsKey;
       this.xmrChannel = data.xmrChannel ?? randomUUID();
       this.macAddress = data.macAddress || this.getMacAddress();
+      this.pendingCmsTransfer = data.pendingCmsTransfer ?? null;
     } catch {
       // Probably the file doesn't exist.
       this.hardwareKey = (await machineId()).substring(0, 40);
@@ -144,6 +149,7 @@ export class Config {
         cmsKey: this.cmsKey,
         macAddress: this.macAddress,
         platform: this.platform,
+        pendingCmsTransfer: this.pendingCmsTransfer,
       }, null, 2),
     );
     await fs.rename(tmp, this.savePath);
@@ -181,6 +187,16 @@ export class Config {
   isLicensed() {
     return true;
     // return this.licence.licensed;
+  }
+
+  async setPendingCmsTransfer(pending: { cmsUrl: string; cmsKey: string; requestedAt: string }) {
+    this.pendingCmsTransfer = pending;
+    await this.save();
+  }
+
+  async clearPendingCmsTransfer() {
+    this.pendingCmsTransfer = null;
+    await this.save();
   }
 
   async setConfig(registerDisplay: RegisterDisplay) {
@@ -257,6 +273,7 @@ export class Config {
       settings: this.settings,
       isConfigured: this.isConfigured(),
       state: this.state.toJson(),
+      pendingCmsTransfer: this.pendingCmsTransfer,
     });
   }
 }
