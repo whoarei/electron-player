@@ -296,6 +296,8 @@ export const startApp = async () => {
 
     initXlrEventHandlers();
     await xlr.playSchedules(response);
+  }).catch((err) => {
+    console.error('[RENDERER] XLR init failed', err);
   });
 
   // Set global xlr for browser access
