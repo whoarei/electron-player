@@ -191,6 +191,53 @@ export function rewriteFontUrls(cssText: string, replacerFn: (fileName: string, 
 export function parseHtmlResourceLinks(resourceHtml: string) {
     const $html = cheerio.load(resourceHtml);
 
+    // Widget scripts measure window size once at render time. On slow devices
+    // the iframe document can finish rendering before the compositor assigns
+    // its viewport, leaving widgets laid out at 0x0 and invisible. Inject a
+    // guard that reloads the document once the real viewport arrives.
+    $html('head').prepend(`<script type="text/javascript">
+(function () {
+    function recent() {
+        var m = /xlrRR=(\\d+)/.exec(window.name || '');
+        return m && (Date.now() - Number(m[1]) < 4000);
+    }
+    function arm() {
+        if (recent()) return;
+        var checks = 0;
+        var iv = setInterval(function () {
+            if (window.innerWidth > 0 && window.innerHeight > 0) {
+                clearInterval(iv);
+                if (recent()) return;
+                window.name = 'xlrRR=' + Date.now();
+                location.reload();
+            } else if (++checks > 750) {
+                clearInterval(iv);
+            }
+        }, 400);
+    }
+    function check() {
+        if (window.innerWidth === 0 || window.innerHeight === 0) arm();
+    }
+    function checkRendered() {
+        // Viewport is fine but the widget laid out at zero size (render
+        // ran while the viewport was 0 and never recovered).
+        if (window.innerWidth === 0 || window.innerHeight === 0) return;
+        var content = document.getElementById('content');
+        if (content && content.children.length > 0 &&
+            document.body.clientWidth === 0 && document.body.clientHeight === 0) {
+            if (recent()) return;
+            window.name = 'xlrRR=' + Date.now();
+            location.reload();
+        }
+    }
+    try {
+        check();
+        window.addEventListener('load', function () {
+            setTimeout(function () { check(); checkRendered(); }, 200);
+        });
+    } catch (e) {}
+    </script>`);
+
     $html('script, link').each((_, element) => {
         const $el = $html(element);
         const attr = $el.is('script') ? 'src' : 'href';
