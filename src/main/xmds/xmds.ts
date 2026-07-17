@@ -907,6 +907,12 @@ export class Xmds {
                 error.response.headers?.['retry-after'],
                 () => this.getData(widgetId)
             );
+          } else if (error.response && error.response.status >= 500 && error.response.status < 600) {
+            // Transient server error (e.g. "Cache not ready") — retry once after a
+            // short backoff so the player can self-recover without waiting for the
+            // next requiredFiles cycle.
+            console.debug('[Xmds::getData] > 5xx received, scheduling retry in 60s');
+            this.setRateLimit(method, '60', () => this.getData(widgetId));
           }
 
           handleError(error, 'Unable to fetch data for widget with id ' + widgetId);

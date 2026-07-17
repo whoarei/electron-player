@@ -551,16 +551,22 @@ const initXmrEventHandlers = async function () {
         id: `${widgetId}`,
         type: 'widget',
       } as FileManagerFileType, widgetData, 'success');
+    } else {
+      console.debug('[XMR::dataUpdate] Received widget data for widget ' + widgetId, { widgetData });
 
-      return;
+      await downloadWidgetDataFile({
+        id: `${widgetId}`,
+        type: 'widget',
+      } as FileManagerFileType, widgetData, 'updated');
     }
 
-    console.debug('[XMR::dataUpdate] Received widget data for widget ' + widgetId, { widgetData });
-
-    await downloadWidgetDataFile({
-      id: `${widgetId}`,
-      type: 'widget',
-    } as FileManagerFileType, widgetData, 'updated');
+    // Widget data is now on disk. Re-emit the current layout loop so XLR retries
+    // prepareLayoutXlf. Without this, a layout that previously failed because the
+    // widget data file was missing stays black-screened indefinitely.
+    if (manager && manager.layouts.length > 0) {
+      console.debug('[XMR::dataUpdate] Re-emitting layouts to notify XLR of new widget data');
+      manager.emitter.emit('layouts', manager.layouts);
+    }
   });
 
   /**
@@ -609,7 +615,16 @@ async function dataWidgetUpdate(file: RequiredFile) {
 
   console.debug('[MAIN] [dataWidgetUpdate] > Received updated widget data for widget ' + file.id, { widgetData });
 
-  return await downloadWidgetDataFile((file as unknown) as FileManagerFileType, widgetData, 'updated');
+  await downloadWidgetDataFile((file as unknown) as FileManagerFileType, widgetData, 'updated');
+
+  // Widget data is now on disk. Re-emit the current layout loop so XLR retries
+  // prepareLayoutXlf — assessLayouts() suppresses re-emit when layout IDs are
+  // unchanged, so we emit directly. Without this, a layout that previously failed
+  // because the widget data file was missing stays black-screened indefinitely.
+  if (manager && manager.layouts.length > 0) {
+    console.debug('[MAIN] [dataWidgetUpdate] > Re-emitting layouts to notify XLR of new widget data');
+    manager.emitter.emit('layouts', manager.layouts);
+  }
 }
 
 let screenshotIntervalId: NodeJS.Timeout | null = null;
@@ -1037,6 +1052,14 @@ const mainFunctions = {
         }, []);
 
         console.debug('[MAIN::manager.on("layouts")] > Sending updated layout loop to renderer', { layouts: _layouts });
+        // Refresh uniqueLayouts in XLR before sending update-loop.
+        // update-unique-layouts is originally sent in the schedule handler, but
+        // at that point playerDb.db may not have the layout files yet (downloads
+        // are still in progress). getLayoutFile returns null and the layout is
+        // skipped, leaving uniqueLayouts empty. By re-sending here (after
+        // assessLayouts picks layouts and files are on disk), XLR's
+        // uniqueLayouts is properly populated before update-loop arrives.
+        win.webContents.send('update-unique-layouts', _layouts);
         // Send updated layout loop to XLR
         win.webContents.send('update-loop', _layouts);
       });
