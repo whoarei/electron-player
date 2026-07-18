@@ -76,6 +76,10 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: 'Publish to Snap Store'
+        # Non-fatal: the .snap is already uploaded as a release asset above.
+        # This step only fails if the SNAPCRAFT_LOGIN secret is missing
+        # (common on fork repos) - configure it in Settings -> Secrets.
+        continue-on-error: true
         uses: snapcore/action-publish@v1
         env:
           # Set the snapcraft credentials env variable
@@ -130,7 +134,10 @@ jobs:
             exit 1
           fi
           echo "Uploading $DEB_PATH to release..."
-          gh release upload ${{ github.event.release.tag_name }} "$DEB_PATH" --clobber
+          # --repo avoids a 'dubious ownership' git error: the checkout action
+          # sets safe.directory under a temporary HOME that is no longer active
+          # when this step runs inside the bullseye container.
+          gh release upload ${{ github.event.release.tag_name }} "$DEB_PATH" --clobber --repo ${{ github.repository }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
