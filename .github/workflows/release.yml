@@ -80,6 +80,48 @@ jobs:
           snap: ${{ env.SNAP_PATH }}
           release: edge
 
+  build-linux-arm64:
+    # Native ARM runner as host; actual build runs in a Debian 11 (bullseye)
+    # container so the .deb keeps an older glibc baseline (2.31).
+    runs-on: ubuntu-24.04-arm
+    container: node:22-bullseye
+    steps:
+      - name: 'Install Build Tools'
+        run: |
+          apt-get update
+          apt-get install -y dpkg-dev fakeroot curl gpg
+          # GitHub CLI apt repo (needed to upload the release asset)
+          mkdir -p -m 755 /etc/apt/keyrings
+          curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+            -o /etc/apt/keyrings/githubcli-archive-keyring.gpg
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+            > /etc/apt/sources.list.d/github-cli.list
+          apt-get update
+          apt-get install -y gh
+
+      - name: 'Checkout Repository'
+        uses: actions/checkout@v4
+
+      - name: 'Install Dependencies'
+        run: npm ci
+
+      - name: 'Build arm64 .deb'
+        run: npm run make
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 'Upload arm64 .deb to Release'
+        run: |
+          DEB_PATH=$(find ./out/make/deb -name "*.deb" -type f | head -n 1)
+          if [ -z "$DEB_PATH" ]; then
+            echo "::error::arm64 .deb file not found!"
+            exit 1
+          fi
+          echo "Uploading $DEB_PATH to release..."
+          gh release upload ${{ github.event.release.tag_name }} "$DEB_PATH" --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   build-windows:
     runs-on: windows-latest
     steps:
