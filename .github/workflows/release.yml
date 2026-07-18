@@ -5,6 +5,10 @@ on:
   release:
     types: [created]
 
+# GITHUB_TOKEN needs write access to upload release assets
+permissions:
+  contents: write
+
 jobs:
   build-linux:
     # We'll run on Ubuntu as it's required for .deb and .snap packages
@@ -98,6 +102,14 @@ jobs:
             > /etc/apt/sources.list.d/github-cli.list
           apt-get update
           apt-get install -y gh
+          # Electron runtime deps: electron-vite's bytecodePlugin() spawns the
+          # electron binary to compile preload to .jsc; the minimal bullseye
+          # image lacks the GUI/X11 libs electron needs to even start, causing
+          # an EPIPE when the process exits immediately.
+          apt-get install -y libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 \
+            libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 \
+            libxfixes3 libxrandr2 libgbm1 libasound2 libpangocairo-1.0-0 \
+            libpango-1.0-0 libcairo2 libgtk-3-0 libglib2.0-0
 
       - name: 'Checkout Repository'
         uses: actions/checkout@v4
@@ -123,7 +135,9 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   build-windows:
-    runs-on: windows-latest
+    # Pin to windows-2022: @electron/node-gyp bundled with Electron 35
+    # cannot detect VS 2026 on the newer windows-latest (win25-vs2026) image
+    runs-on: windows-2022
     steps:
       - name: 'Checkout Repository'
         uses: actions/checkout@v4
